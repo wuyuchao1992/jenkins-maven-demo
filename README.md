@@ -1,249 +1,38 @@
-在Maven项目中合并Cucumber JSON报告，有几种常用的方法。以下是两种最实用的解决方案：
+###########################################################
+# 第一步：只修改这个参数（必填）
+###########################################################
+BRANCH_NAME="master"    # 你的分支名，确认是master即可
 
-方案一：使用cucumber-reporting插件（推荐）
+###########################################################
+# 第二步：复制整个脚本，在本地仓库根目录执行，无需手动修改
+###########################################################
+echo "🔍 正在获取所有提交记录，找到第一次敏感提交ID..."
+# 获取所有commit ID，按时间排序（第一行就是第一次提交，第二行是第二次）
+COMMIT_LIST=$(git log --reverse --pretty=format:"%H")
+FIRST_COMMIT=$(echo "$COMMIT_LIST" | head -n 1)  # 第一次敏感提交ID
+SECOND_COMMIT=$(echo "$COMMIT_LIST" | head -n 2 | tail -n 1)  # 第二次正常提交ID
 
-1. 添加Maven插件配置
+echo "✅ 找到敏感提交ID：$FIRST_COMMIT"
+echo "✅ 找到第一个正常提交ID：$SECOND_COMMIT"
 
-在pom.xml中添加：
+# 1. 基于第二次提交，创建一个新分支（跳过第一次敏感提交）
+git checkout -b temp-branch $SECOND_COMMIT
 
-```xml
-<build>
-    <plugins>
-        <plugin>
-            <groupId>net.masterthought</groupId>
-            <artifactId>maven-cucumber-reporting</artifactId>
-            <version>5.8.0</version>
-            <executions>
-                <execution>
-                    <id>generate-cucumber-reports</id>
-                    <phase>verify</phase>
-                    <goals>
-                        <goal>generate</goal>
-                    </goals>
-                    <configuration>
-                        <projectName>Your Project Name</projectName>
-                        <outputDirectory>${project.build.directory}/cucumber-reports</outputDirectory>
-                        <cucumberOutput>${project.build.directory}/cucumber-reports</cucumberOutput>
-                        <jsonFiles>
-                            <param>**/*.json</param>
-                        </jsonFiles>
-                        <mergeFeaturesById>false</mergeFeaturesById>
-                        <mergeFeaturesWithRetest>false</mergeFeaturesWithRetest>
-                        <parallelTesting>false</parallelTesting>
-                    </configuration>
-                </execution>
-            </executions>
-        </plugin>
-    </plugins>
-</build>
-```
+# 2. 把后续所有提交（从第二次到现在）都 cherry-pick 到新分支
+# 这里获取 第二次提交之后的所有commit ID
+LATER_COMMITS=$(echo "$COMMIT_LIST" | sed '1,2d')
+for commit in $LATER_COMMITS; do
+  git cherry-pick $commit
+done
 
-2. 添加依赖
+# 3. 切换回master分支，强制覆盖为新分支的内容（剔除第一次提交）
+git checkout $BRANCH_NAME
+git reset --hard temp-branch
 
-```xml
-<dependencies>
-    <dependency>
-        <groupId>net.masterthought</groupId>
-        <artifactId>cucumber-reporting</artifactId>
-        <version>5.8.0</version>
-    </dependency>
-</dependencies>
-```
+# 4. 强制推送到远程，彻底覆盖远程历史（删除第一次敏感提交）
+git push -f origin $BRANCH_NAME
 
-方案二：自定义Java代码合并JSON报告
+# 5. 删除临时分支（清理残留）
+git branch -D temp-branch
 
-1. 创建JSON合并工具类
-
-```java
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
-
-import java.io.File;
-import java.io.FileOutputStream;
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.util.ArrayList;
-import java.util.List;
-
-public class CucumberJsonMerger {
-    
-    private static final ObjectMapper mapper = new ObjectMapper();
-    
-    public static void main(String[] args) throws IOException {
-        String reportsDirectory = "target/cucumber-reports";
-        String outputFile = "target/merged-cucumber-report.json";
-        
-        mergeCucumberJsonReports(reportsDirectory, outputFile);
-    }
-    
-    public static void mergeCucumberJsonReports(String inputDir, String outputFile) throws IOException {
-        List<JsonNode> allReports = new ArrayList<>();
-        
-        // 读取所有JSON报告文件
-        Files.walk(Paths.get(inputDir))
-                .filter(path -> path.toString().endsWith(".json"))
-                .forEach(path -> {
-                    try {
-                        JsonNode jsonNode = mapper.readTree(path.toFile());
-                        if (jsonNode.isArray()) {
-                            jsonNode.forEach(allReports::add);
-                        } else {
-                            allReports.add(jsonNode);
-                        }
-                    } catch (IOException e) {
-                        System.err.println("Error reading file: " + path + ", " + e.getMessage());
-                    }
-                });
-        
-        // 合并报告
-        ArrayNode mergedReport = mapper.createArrayNode();
-        for (JsonNode report : allReports) {
-            mergedReport.add(report);
-        }
-        
-        // 写入合并后的文件
-        try (FileOutputStream out = new FileOutputStream(outputFile)) {
-            mapper.writerWithDefaultPrettyPrinter().writeValue(out, mergedReport);
-        }
-        
-        System.out.println("Merged " + allReports.size() + " feature results into " + outputFile);
-    }
-}
-```
-
-2. 在Maven中配置执行
-
-在pom.xml中添加exec-maven-plugin：
-
-```xml
-<plugin>
-    <groupId>org.codehaus.mojo</groupId>
-    <artifactId>exec-maven-plugin</artifactId>
-    <version>3.1.0</version>
-    <executions>
-        <execution>
-            <id>merge-cucumber-reports</id>
-            <phase>post-integration-test</phase>
-            <goals>
-                <goal>java</goal>
-            </goals>
-            <configuration>
-                <mainClass>com.yourpackage.CucumberJsonMerger</mainClass>
-            </configuration>
-        </execution>
-    </executions>
-</plugin>
-```
-
-方案三：使用cucumber-reporting生成统一HTML报告
-
-如果你主要需要查看测试报告，可以生成统一的HTML报告：
-
-```xml
-<plugin>
-    <groupId>net.masterthought</groupId>
-    <artifactId>maven-cucumber-reporting</artifactId>
-    <version>5.8.0</version>
-    <executions>
-        <execution>
-            <id>generate-cucumber-report</id>
-            <phase>verify</phase>
-            <goals>
-                <goal>generate</goal>
-            </goals>
-            <configuration>
-                <projectName>cucumber-jvm-example</projectName>
-                <outputDirectory>${project.build.directory}/cucumber-reports/advanced-reports</outputDirectory>
-                <jsonFiles>
-                    <param>${project.build.directory}/cucumber-reports/*.json</param>
-                </jsonFiles>
-                <classificationFiles>
-                    <param>sample.properties</param>
-                </classificationFiles>
-            </configuration>
-        </execution>
-    </executions>
-</plugin>
-```
-
-完整的Maven配置示例
-
-```xml
-<build>
-    <plugins>
-        <!-- 运行Cucumber测试 -->
-        <plugin>
-            <groupId>org.apache.maven.plugins</groupId>
-            <artifactId>maven-failsafe-plugin</artifactId>
-            <version>3.0.0-M5</version>
-            <executions>
-                <execution>
-                    <goals>
-                        <goal>integration-test</goal>
-                        <goal>verify</goal>
-                    </goals>
-                </execution>
-            </executions>
-            <configuration>
-                <includes>
-                    <include>**/*Test.java</include>
-                </includes>
-            </configuration>
-        </plugin>
-        
-        <!-- 合并JSON报告 -->
-        <plugin>
-            <groupId>org.codehaus.mojo</groupId>
-            <artifactId>exec-maven-plugin</artifactId>
-            <version>3.1.0</version>
-            <executions>
-                <execution>
-                    <id>merge-cucumber-reports</id>
-                    <phase>post-integration-test</phase>
-                    <goals>
-                        <goal>java</goal>
-                    </goals>
-                    <configuration>
-                        <mainClass>com.yourpackage.CucumberJsonMerger</mainClass>
-                    </configuration>
-                </execution>
-            </executions>
-        </plugin>
-        
-        <!-- 生成HTML报告 -->
-        <plugin>
-            <groupId>net.masterthought</groupId>
-            <artifactId>maven-cucumber-reporting</artifactId>
-            <version>5.8.0</version>
-            <executions>
-                <execution>
-                    <id>generate-cucumber-report</id>
-                    <phase>verify</phase>
-                    <goals>
-                        <goal>generate</goal>
-                    </goals>
-                    <configuration>
-                        <projectName>Your Project</projectName>
-                        <outputDirectory>${project.build.directory}/cucumber-reports</outputDirectory>
-                        <jsonFiles>
-                            <param>${project.build.directory}/merged-cucumber-report.json</param>
-                        </jsonFiles>
-                    </configuration>
-                </execution>
-            </executions>
-        </plugin>
-    </plugins>
-</build>
-```
-
-使用方法
-
-1. 运行测试：mvn clean verify
-2. 合并后的JSON报告将生成在：target/merged-cucumber-report.json
-3. HTML报告将生成在：target/cucumber-reports
-
-推荐使用方案一，因为它专门为Cucumber报告设计，能够正确处理各种场景和并发执行的结果合并。
+echo "🎉 操作完成！第一次提交的敏感数据已彻底删除，后续所有提交均保留！"
