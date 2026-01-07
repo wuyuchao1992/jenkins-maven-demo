@@ -1,38 +1,19 @@
-###########################################################
-# 第一步：只修改这个参数（必填）
-###########################################################
-BRANCH_NAME="master"    # 你的分支名，确认是master即可
+BRANCH_NAME="master"
+# 1. 获取第一次敏感提交ID
+FIRST_COMMIT=$(git log --reverse --pretty=format:"%H" | head -n 1)
+# 2. 交互式rebase，基于第一次提交之前（空白节点）重构历史
+git rebase -i --root $FIRST_COMMIT
 
-###########################################################
-# 第二步：复制整个脚本，在本地仓库根目录执行，无需手动修改
-###########################################################
-echo "🔍 正在获取所有提交记录，找到第一次敏感提交ID..."
-# 获取所有commit ID，按时间排序（第一行就是第一次提交，第二行是第二次）
-COMMIT_LIST=$(git log --reverse --pretty=format:"%H")
-FIRST_COMMIT=$(echo "$COMMIT_LIST" | head -n 1)  # 第一次敏感提交ID
-SECOND_COMMIT=$(echo "$COMMIT_LIST" | head -n 2 | tail -n 1)  # 第二次正常提交ID
+# ✅ 执行上一行后，会弹出编辑器，操作如下：
+# 1. 找到第一次提交的那一行（开头是 pick）
+# 2. 把这一行的 pick 改成 drop （表示删除这个提交）
+# 3. 后续所有提交的 pick 都保留不变
+# 4. 保存退出编辑器（vim：按 ESC → 输入 :wq → 回车）
 
-echo "✅ 找到敏感提交ID：$FIRST_COMMIT"
-echo "✅ 找到第一个正常提交ID：$SECOND_COMMIT"
+# 3. 若rebase过程中出现冲突，解决冲突后执行：
+# git add .
+# git rebase --continue
 
-# 1. 基于第二次提交，创建一个新分支（跳过第一次敏感提交）
-git checkout -b temp-branch $SECOND_COMMIT
-
-# 2. 把后续所有提交（从第二次到现在）都 cherry-pick 到新分支
-# 这里获取 第二次提交之后的所有commit ID
-LATER_COMMITS=$(echo "$COMMIT_LIST" | sed '1,2d')
-for commit in $LATER_COMMITS; do
-  git cherry-pick $commit
-done
-
-# 3. 切换回master分支，强制覆盖为新分支的内容（剔除第一次提交）
-git checkout $BRANCH_NAME
-git reset --hard temp-branch
-
-# 4. 强制推送到远程，彻底覆盖远程历史（删除第一次敏感提交）
+# 4. 强制推送到远程，覆盖历史
 git push -f origin $BRANCH_NAME
-
-# 5. 删除临时分支（清理残留）
-git branch -D temp-branch
-
-echo "🎉 操作完成！第一次提交的敏感数据已彻底删除，后续所有提交均保留！"
+echo "✅ 第一次敏感commit已删除，代码和后续提交全保留！"
