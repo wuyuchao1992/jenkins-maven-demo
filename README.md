@@ -1,4 +1,3 @@
-
 <build>
     <plugins>
         <!-- 1. JMeter 插件：只跑测试，不生成报告 -->
