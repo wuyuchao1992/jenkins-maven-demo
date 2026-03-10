@@ -1,2 +1,24 @@
-<img width="228" height="272" alt="image" src="https://github.com/user-attachments/assets/6422bdb9-14a6-4c80-a73c-c5d4c0b73c0e" />
-<img width="221" height="272" alt="image" src="https://github.com/user-attachments/assets/550d41e5-b377-47b5-b55a-539ca1b9239f" />
+
+// 关键：禁止 WebDriver Sampler 自动生成结果
+ctx.setSampleStarted(false)
+
+// 自己创建样本
+SampleResult res = new SampleResult()
+res.setSampleLabel("你的业务步骤名")
+res.sampleStart()
+
+// ====================
+// 这里放你的 WebDriver 代码
+// WDS.browser.get("xxx")
+// WDS.findElement...
+// ====================
+
+res.sampleEnd()
+
+// 标记成功/失败
+res.setSuccessful(true)
+res.setResponseCode("200")
+res.setResponseMessage("OK")
+
+// 把结果交给 JMeter
+sampler.setSampleResult(res)
